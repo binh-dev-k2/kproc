@@ -1,0 +1,34 @@
+{
+  "name": "kprocess",
+  "version": "1.0.0",
+  "description": "Kill a process by its PID or port",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "kill",
+    "process",
+    "pid",
+    "port",
+    "kill-process",
+    "kill-port",
+    "kill-pid",
+    "kill-pids",
+    "kprocess"
+  ],
+  "author": "binhcoder02@gmail.com",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  }
+}
