@@ -24,7 +24,7 @@
     "kprocess"
   ],
   "author": "binhcoder02@gmail.com",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "@types/node": "^24.3.0",
