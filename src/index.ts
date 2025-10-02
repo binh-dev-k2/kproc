@@ -39,10 +39,39 @@ interface FindByNameOptions {
     useRegex?: boolean;
 }
 
+// Custom error classes for better error handling
+class ProcessNotFoundError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ProcessNotFoundError';
+    }
+}
+
+class CommandExecutionError extends Error {
+    constructor(message: string, public command: string) {
+        super(message);
+        this.name = 'CommandExecutionError';
+    }
+}
+
+class TimeoutError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'TimeoutError';
+    }
+}
+
+class InvalidInputError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'InvalidInputError';
+    }
+}
+
 const withTimeout = (promise: Promise<string>, ms?: number): Promise<string> => {
     if (!ms || ms <= 0) return promise;
     return new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error(`Operation timed out after ${ms} ms`)), ms);
+        const t = setTimeout(() => reject(new TimeoutError(`Operation timed out after ${ms} ms`)), ms);
         promise.then((v) => {
             clearTimeout(t);
             resolve(v);
@@ -53,13 +82,24 @@ const withTimeout = (promise: Promise<string>, ms?: number): Promise<string> => 
     });
 };
 
-const execText = (cmd: string, timeoutMs?: number): Promise<string> => {
-    return withTimeout(new Promise((resolve, reject) => {
-        exec(cmd, { windowsHide: true }, (err, stdout, stderr) => {
-            if (err) return reject(new Error(stderr?.trim() || err.message));
-            resolve(stdout || "");
-        });
-    }), timeoutMs);
+const execText = async (cmd: string, timeoutMs?: number): Promise<string> => {
+    try {
+        return await withTimeout(new Promise((resolve, reject) => {
+            exec(cmd, { windowsHide: true }, (err, stdout, stderr) => {
+                if (err) {
+                    const errorMsg = stderr?.trim() || err.message;
+                    reject(new CommandExecutionError(`Command failed: ${errorMsg}`, cmd));
+                    return;
+                }
+                resolve(stdout || "");
+            });
+        }), timeoutMs);
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            throw error;
+        }
+        throw new CommandExecutionError(`Failed to execute command: ${cmd}`, cmd);
+    }
 };
 
 /**
@@ -68,27 +108,43 @@ const execText = (cmd: string, timeoutMs?: number): Promise<string> => {
  * Windows: netstat -ano | findstr :<port>
  * Unix: lsof -t -i :<port>
  */
-const findPidsByPort = (port: number, timeoutMs?: number): Promise<number[]> => {
-    return execText(isWindows ? `netstat -ano | findstr :${port}` : `lsof -t -i :${port}`, timeoutMs)
-        .then((stdout) => {
-            if (!stdout) return [];
-            const pids = new Set<number>();
-            const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
-            if (isWindows) {
-                for (const line of lines) {
-                    const parts = line.trim().split(/\s+/);
-                    const pidNum = Number(parts[parts.length - 1]);
-                    if (!Number.isNaN(pidNum)) pids.add(pidNum);
-                }
-            } else {
-                for (const line of lines) {
-                    const pidNum = Number(line.trim());
-                    if (!Number.isNaN(pidNum)) pids.add(pidNum);
-                }
+const findPidsByPort = async (port: number, timeoutMs?: number): Promise<number[]> => {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new InvalidInputError(`Invalid port number: ${port}. Must be between 1 and 65535.`);
+    }
+
+    try {
+        const stdout = await execText(
+            isWindows ? `netstat -ano | findstr :${port}` : `lsof -t -i :${port}`,
+            timeoutMs
+        );
+
+        if (!stdout.trim()) return [];
+
+        const pids = new Set<number>();
+        const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+
+        if (isWindows) {
+            for (const line of lines) {
+                const parts = line.trim().split(/\s+/);
+                const pidNum = Number(parts[parts.length - 1]);
+                if (!Number.isNaN(pidNum) && pidNum > 0) pids.add(pidNum);
             }
-            return [...pids];
-        })
-        .catch(() => []);
+        } else {
+            for (const line of lines) {
+                const pidNum = Number(line.trim());
+                if (!Number.isNaN(pidNum) && pidNum > 0) pids.add(pidNum);
+            }
+        }
+
+        return [...pids];
+    } catch (error) {
+        if (error instanceof CommandExecutionError) {
+            // If command fails, it might mean no processes on that port
+            return [];
+        }
+        throw error;
+    }
 };
 
 /**
@@ -98,7 +154,7 @@ const findPidsByPort = (port: number, timeoutMs?: number): Promise<number[]> => 
 const findPidByPort = async (port: number, timeoutMs?: number): Promise<number> => {
     const pids = await findPidsByPort(port, timeoutMs);
     if (pids.length === 0) {
-        throw new Error(`No process found on port ${port}`);
+        throw new ProcessNotFoundError(`No process found on port ${port}`);
     }
     return pids[0]; // Return the first/main PID
 };
@@ -107,36 +163,68 @@ const findPidByPort = async (port: number, timeoutMs?: number): Promise<number> 
  * Kill a process by its PID.
  */
 const killByPid = async (pid: number, options: KillOptions = {}): Promise<void> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+        throw new InvalidInputError(`Invalid PID: ${pid}. Must be a positive integer.`);
+    }
+
     const { signal = "SIGTERM", dryRun = false, tree = false, timeoutMs } = options;
-    if (dryRun) return;
-    if (isWindows) {
-        const flags = tree ? "/T /F" : "/F";
-        await execText(`taskkill /PID ${pid} ${flags}`, timeoutMs);
+
+    if (dryRun) {
+        console.log(`[DRY RUN] Would kill process ${pid} with signal ${signal}${tree ? ' (tree)' : ''}`);
         return;
     }
-    const sig = typeof signal === "number" ? signal : signal.toString();
-    if (tree) {
-        const descendants = await findDescendantPids(pid, timeoutMs);
-        // Kill children first, then the parent
-        for (const child of descendants) {
-            await execText(`kill -s ${sig} ${child}`, timeoutMs).catch(() => { /* ignore child failures */ });
+
+    try {
+        if (isWindows) {
+            const flags = tree ? "/T /F" : "/F";
+            await execText(`taskkill /PID ${pid} ${flags}`, timeoutMs);
+        } else {
+            const sig = typeof signal === "number" ? signal : signal.toString();
+            if (tree) {
+                const descendants = await findDescendantPids(pid, timeoutMs);
+                // Kill children first, then the parent
+                for (const child of descendants) {
+                    try {
+                        await execText(`kill -s ${sig} ${child}`, timeoutMs);
+                    } catch (error) {
+                        console.warn(`Failed to kill child process ${child}: ${(error as Error).message}`);
+                    }
+                }
+            }
+            await execText(`kill -s ${sig} ${pid}`, timeoutMs);
         }
+    } catch (error) {
+        if (error instanceof CommandExecutionError) {
+            throw new ProcessNotFoundError(`Failed to kill process ${pid}: ${error.message}`);
+        }
+        throw error;
     }
-    await execText(`kill -s ${sig} ${pid}`, timeoutMs);
 };
 
 /**
  * Kill multiple processes by their PIDs.
- * Logs failures individually without throwing.
+ * Throws if any process fails to kill.
  */
 const killByPids = async (pids: number[], options: KillOptions = {}): Promise<void> => {
-    await Promise.all(pids.map(async (pid) => {
+    if (!Array.isArray(pids) || pids.length === 0) {
+        throw new InvalidInputError("PIDs array must be non-empty");
+    }
+
+    const errors: string[] = [];
+
+    for (const pid of pids) {
         try {
             await killByPid(pid, options);
-        } catch (e) {
-            console.log(`Failed to kill process ${pid}: ${(e as Error).message}`);
+        } catch (error) {
+            const errorMsg = `Failed to kill process ${pid}: ${(error as Error).message}`;
+            errors.push(errorMsg);
+            console.error(errorMsg);
         }
-    }));
+    }
+
+    if (errors.length > 0) {
+        throw new ProcessNotFoundError(`Failed to kill ${errors.length} processes: ${errors.join('; ')}`);
+    }
 };
 
 /**
@@ -152,12 +240,26 @@ const killByPort = async (port: number, options: KillOptions = {}): Promise<void
  * Kill all processes bound to any of the given ports.
  */
 const killByPorts = async (ports: number[], options: KillOptions = {}): Promise<void> => {
-    const unique = new Set<number>();
-    for (const port of ports) {
-        const pids = await findPidsByPort(port, options.timeoutMs);
-        for (const pid of pids) unique.add(pid);
+    if (!Array.isArray(ports) || ports.length === 0) {
+        throw new InvalidInputError("Ports array must be non-empty");
     }
-    if (unique.size === 0) throw new Error(`No process found on ports: ${ports.join(", ")}`);
+
+    const unique = new Set<number>();
+    const errors: string[] = [];
+
+    for (const port of ports) {
+        try {
+            const pids = await findPidsByPort(port, options.timeoutMs);
+            for (const pid of pids) unique.add(pid);
+        } catch (error) {
+            errors.push(`Port ${port}: ${(error as Error).message}`);
+        }
+    }
+
+    if (unique.size === 0) {
+        throw new ProcessNotFoundError(`No processes found on ports: ${ports.join(", ")}. Errors: ${errors.join('; ')}`);
+    }
+
     await killByPids([...unique], options);
 };
 
@@ -165,7 +267,16 @@ const killByPorts = async (ports: number[], options: KillOptions = {}): Promise<
  * Kill all processes bound to ports within [start, end] inclusive.
  */
 const killByPortRange = async (start: number, end: number, options: KillOptions = {}): Promise<void> => {
-    if (end < start) throw new Error("Invalid port range: end < start");
+    if (!Number.isInteger(start) || !Number.isInteger(end)) {
+        throw new InvalidInputError("Start and end must be integers");
+    }
+    if (end < start) {
+        throw new InvalidInputError("Invalid port range: end < start");
+    }
+    if (start < 1 || end > 65535) {
+        throw new InvalidInputError("Port range must be between 1 and 65535");
+    }
+
     const ports: number[] = [];
     for (let p = start; p <= end; p++) ports.push(p);
     await killByPorts(ports, options);
@@ -177,8 +288,19 @@ const killByPortRange = async (start: number, end: number, options: KillOptions 
  * - Unix: uses ps to list pid, comm, args.
  */
 const findPidsByName = async (nameOrPattern: string, opts: FindByNameOptions = {}, timeoutMs?: number): Promise<number[]> => {
+    if (!nameOrPattern || typeof nameOrPattern !== 'string') {
+        throw new InvalidInputError("Name or pattern must be a non-empty string");
+    }
+
     const { useRegex = false } = opts;
-    const matcher = buildMatcher(nameOrPattern, useRegex);
+    let matcher: (s: string) => boolean;
+
+    try {
+        matcher = buildMatcher(nameOrPattern, useRegex);
+    } catch (error) {
+        throw new InvalidInputError(`Invalid pattern: ${(error as Error).message}`);
+    }
+
     try {
         if (isWindows) {
             const psCmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress"`;
@@ -199,8 +321,11 @@ const findPidsByName = async (nameOrPattern: string, opts: FindByNameOptions = {
             }
             return pids;
         }
-    } catch {
-        return [];
+    } catch (error) {
+        if (error instanceof CommandExecutionError) {
+            throw new ProcessNotFoundError(`Failed to find processes by name: ${error.message}`);
+        }
+        throw error;
     }
 };
 
@@ -208,7 +333,9 @@ const findPidsByName = async (nameOrPattern: string, opts: FindByNameOptions = {
 const killByName = async (nameOrPattern: string, opts: FindByNameOptions & KillOptions = {}): Promise<void> => {
     const { timeoutMs, ...rest } = opts as KillOptions & FindByNameOptions;
     const pids = await findPidsByName(nameOrPattern, { useRegex: (opts as FindByNameOptions).useRegex }, timeoutMs);
-    if (pids.length === 0) throw new Error(`No process matched pattern: ${nameOrPattern}`);
+    if (pids.length === 0) {
+        throw new ProcessNotFoundError(`No process matched pattern: ${nameOrPattern}`);
+    }
     await killByPids(pids, rest as KillOptions);
 };
 
@@ -216,6 +343,10 @@ const killByName = async (nameOrPattern: string, opts: FindByNameOptions & KillO
  * Reverse lookup: find all listening/connected ports for a PID.
  */
 const findPortsByPid = async (pid: number, timeoutMs?: number): Promise<number[]> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+        throw new InvalidInputError(`Invalid PID: ${pid}. Must be a positive integer.`);
+    }
+
     try {
         if (isWindows) {
             const out = await execText(`netstat -ano | findstr ${pid}`, timeoutMs);
@@ -239,8 +370,11 @@ const findPortsByPid = async (pid: number, timeoutMs?: number): Promise<number[]
             }
             return [...ports];
         }
-    } catch {
-        return [];
+    } catch (error) {
+        if (error instanceof CommandExecutionError) {
+            throw new ProcessNotFoundError(`Failed to find ports for PID ${pid}: ${error.message}`);
+        }
+        throw error;
     }
 };
 
@@ -252,7 +386,7 @@ const buildMatcher = (pattern: string, useRegex: boolean): ((s: string) => boole
         try {
             re = new RegExp(pattern, "i");
         } catch (e) {
-            throw new Error(`Invalid regex pattern: ${(e as Error).message}`);
+            throw new InvalidInputError(`Invalid regex pattern: ${(e as Error).message}`);
         }
         return (s: string) => re.test(s || "");
     }
@@ -267,8 +401,8 @@ const parseWindowsPsJson = (jsonText: string): Array<{ ProcessId: number; Name: 
         const data = JSON.parse(text);
         if (Array.isArray(data)) return data;
         return [data];
-    } catch {
-        return [];
+    } catch (error) {
+        throw new CommandExecutionError(`Failed to parse PowerShell JSON output: ${(error as Error).message}`, "PowerShell");
     }
 };
 
@@ -287,50 +421,64 @@ const parsePortFromLsof = (line: string): number | null => {
 };
 
 const findChildPidsOnce = async (ppid: number, timeoutMs?: number): Promise<number[]> => {
-    if (isWindows) {
-        // On Windows, taskkill with /T handles tree killing, but we still support discovery for parity.
-        // Use PowerShell to query child processes by ParentProcessId
-        try {
+    if (!Number.isInteger(ppid) || ppid <= 0) {
+        throw new InvalidInputError(`Invalid parent PID: ${ppid}. Must be a positive integer.`);
+    }
+
+    try {
+        if (isWindows) {
             const out = await execText(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${ppid} } | Select-Object ProcessId | ConvertTo-Json -Compress"`, timeoutMs);
             const arr = parseWindowsPsJson(out);
             return arr.map(a => a.ProcessId).filter((n) => Number.isFinite(n));
-        } catch {
-            return [];
+        } else {
+            const out = await execText(`ps -o pid= --ppid ${ppid}`, timeoutMs);
+            return out.split(/\r?\n/).map(s => Number(s.trim())).filter(n => !Number.isNaN(n) && n > 0);
         }
-    }
-    // Unix
-    try {
-        const out = await execText(`ps -o pid= --ppid ${ppid}`, timeoutMs);
-        return out.split(/\r?\n/).map(s => Number(s.trim())).filter(n => !Number.isNaN(n) && n > 0);
-    } catch {
-        return [];
+    } catch (error) {
+        if (error instanceof CommandExecutionError) {
+            throw new ProcessNotFoundError(`Failed to find child processes of PID ${ppid}: ${error.message}`);
+        }
+        throw error;
     }
 };
 
 const findDescendantPids = async (pid: number, timeoutMs?: number): Promise<number[]> => {
     const result: number[] = [];
     const queue: number[] = [pid];
+    const visited = new Set<number>();
+
     while (queue.length) {
         const current = queue.shift()!;
-        const children = await findChildPidsOnce(current, timeoutMs);
-        for (const c of children) {
-            result.push(c);
-            queue.push(c);
+        if (visited.has(current)) continue;
+        visited.add(current);
+
+        try {
+            const children = await findChildPidsOnce(current, timeoutMs);
+            for (const c of children) {
+                if (!visited.has(c)) {
+                    result.push(c);
+                    queue.push(c);
+                }
+            }
+        } catch (error) {
+            console.warn(`Failed to find children of PID ${current}: ${(error as Error).message}`);
         }
     }
+
     // Exclude the root pid itself; caller decides order
     return result.filter((p) => p !== pid);
 };
 
 export {
-    findPidByPort, findPidsByName,
+    CommandExecutionError, findPidByPort, findPidsByName,
     // core lookups
-    findPidsByPort, findPortsByPid, killByName,
+    findPidsByPort, findPortsByPid, InvalidInputError, killByName,
     // kill primitives
     killByPid,
     killByPids,
     killByPort, killByPortRange, killByPorts,
     // types
-    KillOptions
+    KillOptions,
+    // error classes
+    ProcessNotFoundError, TimeoutError
 };
-
