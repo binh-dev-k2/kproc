@@ -1,6 +1,6 @@
 {
   "name": "kproc",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Kill a process by its PID or port",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

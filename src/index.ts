@@ -92,6 +92,18 @@ const findPidsByPort = (port: number, timeoutMs?: number): Promise<number[]> => 
 };
 
 /**
+ * Find the main process ID (parent) that is bound to a given port.
+ * Returns the first/main PID found on the port.
+ */
+const findPidByPort = async (port: number, timeoutMs?: number): Promise<number> => {
+    const pids = await findPidsByPort(port, timeoutMs);
+    if (pids.length === 0) {
+        throw new Error(`No process found on port ${port}`);
+    }
+    return pids[0]; // Return the first/main PID
+};
+
+/**
  * Kill a process by its PID.
  */
 const killByPid = async (pid: number, options: KillOptions = {}): Promise<void> => {
@@ -128,13 +140,12 @@ const killByPids = async (pids: number[], options: KillOptions = {}): Promise<vo
 };
 
 /**
- * Kill all processes bound to a given port.
+ * Kill the main process bound to a given port.
  * Throws if none found.
  */
 const killByPort = async (port: number, options: KillOptions = {}): Promise<void> => {
-    const pids = await findPidsByPort(port, options.timeoutMs);
-    if (pids.length === 0) throw new Error(`No process found on port ${port}`);
-    await killByPids(pids, options);
+    const pid = await findPidByPort(port, options.timeoutMs);
+    await killByPid(pid, options);
 };
 
 /**
@@ -312,7 +323,7 @@ const findDescendantPids = async (pid: number, timeoutMs?: number): Promise<numb
 };
 
 export {
-    findPidsByName,
+    findPidByPort, findPidsByName,
     // core lookups
     findPidsByPort, findPortsByPid, killByName,
     // kill primitives
