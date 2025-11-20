@@ -1,213 +1,370 @@
 # kproc
 
-A lightweight Node.js utility to kill processes by PID or port number. Cross-platform support for Windows, Linux, and macOS.
+> Lightweight Node.js utility để kill processes theo PID hoặc port - Cross-platform, TypeScript, zero dependencies.
 
-## Features
+[![npm version](https://img.shields.io/npm/v/kproc.svg)](https://www.npmjs.com/package/kproc)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-- 🚀 **Cross-platform**: Works on Windows, Linux, and macOS
-- ⚡ **Lightweight**: No external dependencies
-- 🔧 **TypeScript**: Full TypeScript support with type definitions
-- 🎯 **Simple API**: Easy-to-use functions for process management
-- 🛡️ **Safe**: Graceful error handling and logging
+## ✨ Features
 
-## Installation
+- 🚀 Kill process theo PID, port, port range, hoặc tên
+- 🔄 Retry mechanism với signal escalation (SIGTERM → SIGKILL)
+- ✅ Process verification (xác nhận process đã chết)
+- 🌳 Kill entire process tree (parent + children)
+- 📊 Detailed results với status, error, verification
+- ⚡ Smart caching và parallel operations
+- 🐛 Debug logging
+- 💻 Cross-platform (Windows, Linux, macOS)
+- 📦 Zero dependencies
+
+## 📦 Installation
 
 ```bash
 npm install kproc
 ```
 
-## Usage
+## 🚀 Quick Start
 
-### Kill process by PID (with options)
+### Kill process on port (most common)
 
-```javascript
+```typescript
+import { killByPort } from 'kproc';
+
+// Free up port 3000
+await killByPort(3000);
+```
+
+### Kill by PID
+
+```typescript
 import { killByPid } from 'kproc';
 
-// Kill a single process by PID
-await killByPid(1234, {
-  signal: 'SIGTERM',   // Unix only; ignored on Windows
-  tree: true,          // kill process tree
-  dryRun: false,       // set true to simulate
-  timeoutMs: 5000
+// Simple kill
+await killByPid(1234);
+
+// Kill with verification
+const result = await killByPid(1234, {
+    verify: true,    // Confirm process is dead
+    retries: 3,      // Retry up to 3 times
+    tree: true       // Kill all children too
 });
-```
 
-### Kill multiple processes by PIDs
-
-```javascript
-import { killByPids } from 'kproc';
-
-const pids = [1234, 5678, 9012];
-await killByPids(pids, { tree: true }); // failures are logged per PID
-```
-
-### Kill process by port / ports / port range
-
-```javascript
-import { killByPort, killByPorts, killByPortRange } from 'kproc';
-
-await killByPort(3000, { signal: 'SIGKILL' });
-await killByPorts([3000, 3001]);
-await killByPortRange(3000, 3010);
-```
-
-### Find PIDs by port / by name, and reverse lookup ports by PID
-
-```javascript
-import { findPidsByPort, findPidsByName, findPortsByPid } from 'kproc';
-
-const pidsOn8080 = await findPidsByPort(8080);
-const nodePids = await findPidsByName('node', { useRegex: false });
-const portsOfPid = await findPortsByPid(1234);
-console.log(pidsOn8080, nodePids, portsOfPid);
-
-// Kill by name/command pattern
-import { killByName } from 'kproc';
-await killByName('node --inspect', { useRegex: false, tree: true });
-```
-
-## API Reference
-
-### `killByPid(pid: number, options?: KillOptions): Promise<void>`
-
-Kills a single process by its PID.
-
-**Parameters:**
-- `pid` (number): The process ID to kill
-- `options` (KillOptions): `{ signal?, dryRun?, tree?, timeoutMs? }`
-
-**Returns:** Promise that resolves when the process is killed
-
-**Throws:** Error if the process cannot be killed
-
-### `killByPids(pids: number[], options?: KillOptions): Promise<void>`
-
-Kills multiple processes by their PIDs. Logs any failures to console but doesn't throw errors.
-
-**Parameters:**
-- `pids` (number[]): Array of process IDs to kill
-- `options` (KillOptions)
-
-**Returns:** Promise that resolves when all kill attempts are complete
-
-### `killByPort(port: number, options?: KillOptions): Promise<void>`
-
-Kills all processes bound to a specific port.
-
-**Parameters:**
-- `port` (number): The port number to kill processes from
-- `options` (KillOptions)
-
-**Returns:** Promise that resolves when all processes are killed
-
-**Throws:** Error if no processes are found on the specified port
-
-### `killByPorts(ports: number[], options?: KillOptions): Promise<void>`
-
-Kills processes bound to any of the given ports.
-
-**Parameters:**
-- `ports` (number[]): List of port numbers
-- `options` (KillOptions)
-
-### `killByPortRange(start: number, end: number, options?: KillOptions): Promise<void>`
-
-Kills processes bound to ports within the range `[start, end]`.
-
-**Parameters:**
-- `start` (number), `end` (number)
-- `options` (KillOptions)
-
-### `findPidsByPort(port: number, timeoutMs?: number): Promise<number[]>`
-
-Finds all process IDs bound to a specific port.
-
-**Parameters:**
-- `port` (number): The port number to search
-- `timeoutMs` (number, optional)
-
-**Returns:** Promise that resolves to an array of PIDs
-
-### `findPidsByName(pattern: string, options?: { useRegex?: boolean }, timeoutMs?: number): Promise<number[]>`
-
-Finds PIDs by process name or full command line.
-
-### `findPortsByPid(pid: number, timeoutMs?: number): Promise<number[]>`
-
-Reverse lookup: find ports used by a PID.
-
-### `killByName(pattern: string, options?: { useRegex?: boolean } & KillOptions): Promise<void>`
-
-Kill processes by name/command pattern.
-
-## Platform Support
-
-### Windows
-- Uses `netstat -ano | findstr :<port>` to find processes by port
-- Uses PowerShell `Get-CimInstance Win32_Process` for name/command lookups
-- Uses `taskkill /PID <pid> /F` (and `/T` for tree) to kill processes
-
-### Unix-based (Linux/macOS)
-- Uses `lsof -t -i :<port>` to find processes by port
-- Uses `ps` for name/command and child-process discovery
-- Uses `kill -s <signal> <pid>` (default `SIGTERM`)
-
-## Examples
-
-### Kill a development server
-
-```javascript
-import { killByPort } from 'kproc';
-await killByPort(3000, { tree: true });
-```
-
-### Clean up multiple processes
-
-```javascript
-import { killByPids } from 'kproc';
-const processesToKill = [1234, 5678];
-await killByPids(processesToKill, { signal: 'SIGTERM' });
-```
-
-### Find and kill processes
-
-```javascript
-import { findPidsByPort, killByPids } from 'kproc';
-const pids = await findPidsByPort(8080);
-if (pids.length) await killByPids(pids, { tree: true });
-```
-
-## Error Handling
-
-The package provides graceful error handling:
-
-- `killByPid()` throws if the process cannot be killed
-- `killByPids()` logs per-PID failures but does not throw
-- `killByPort*()` throws if no processes are found
-- `find*()` functions return an empty array if commands are unavailable or no matches
-
-## Types
-
-```ts
-type UnixSignal = 'SIGTERM' | 'SIGKILL' | 'SIGINT' | 'SIGHUP' | 'SIGQUIT' | number;
-
-interface KillOptions {
-  signal?: UnixSignal; // Unix only; default 'SIGTERM'
-  dryRun?: boolean;    // simulate without killing
-  tree?: boolean;      // kill process tree
-  timeoutMs?: number;  // per-command timeout
+if (result.success) {
+    console.log('✓ Process killed');
 }
 ```
 
-## License
+### Find process on port
 
-MIT License - see [LICENSE](LICENSE) file for details.
+```typescript
+import { findPidsByPort, getProcessInfo } from 'kproc';
 
-## Contributing
+// Find PIDs
+const pids = await findPidsByPort(8080);
+
+// Get detailed info
+const info = await getProcessInfo(pids[0]);
+console.log(info);
+// { pid, name, command, ports, parentPid, memoryUsage }
+```
+
+### Kill multiple processes
+
+```typescript
+import { killByPids, killByPorts, killByPortRange } from 'kproc';
+
+// Kill multiple PIDs in parallel
+const results = await killByPids([1234, 5678, 9012]);
+
+// Kill multiple ports
+await killByPorts([3000, 3001, 8080]);
+
+// Kill port range
+await killByPortRange(3000, 3010);
+```
+
+### Kill by name
+
+```typescript
+import { killByName } from 'kproc';
+
+// Kill all Chrome processes
+await killByName('chrome', { tree: true });
+
+// Kill with regex
+await killByName('node.*--inspect', { 
+    useRegex: true,
+    tree: true 
+});
+```
+
+## 🎯 Advanced Options
+
+```javascript
+await killByPid(1234, {
+    // Unix signal (ignored on Windows)
+    signal: 'SIGTERM',              // default
+    
+    // Auto-escalate to SIGKILL if process won't die (Unix)
+    forceAfterTimeout: true,
+    escalationDelayMs: 3000,        // wait 3s before SIGKILL
+    
+    // Verify process is actually dead
+    verify: true,
+    
+    // Retry on failure
+    retries: 3,
+    
+    // Kill entire process tree
+    tree: true,
+    
+    // Command timeout
+    timeoutMs: 5000,
+    
+    // Debug logging
+    debug: true
+});
+```
+
+## 📚 API Reference
+
+### Kill Functions
+
+```typescript
+killByPid(pid: number, options?: KillOptions): Promise<KillResult>
+killByPids(pids: number[], options?: KillOptions): Promise<KillResult[]>
+killByPort(port: number, options?: KillOptions): Promise<KillResult>
+killByPorts(ports: number[], options?: KillOptions): Promise<KillResult[]>
+killByPortRange(start: number, end: number, options?: KillOptions): Promise<KillResult[]>
+killByName(pattern: string, options?: FindByNameOptions & KillOptions): Promise<KillResult[]>
+```
+
+### Lookup Functions
+
+```typescript
+findPidsByPort(port: number): Promise<number[]>
+findPidByPort(port: number): Promise<number>
+findPidsByName(pattern: string, options?: FindByNameOptions): Promise<number[]>
+findPortsByPid(pid: number): Promise<number[]>
+getProcessInfo(pid: number): Promise<ProcessInfo>
+isProcessAlive(pid: number): Promise<boolean>
+```
+
+### Utilities
+
+```typescript
+setDebug(enabled: boolean): void           // Enable debug logs
+clearCache(): void                         // Clear process cache
+getCacheStats(): { size: number, oldestAge: number | null }
+```
+
+### Types
+
+```typescript
+interface KillOptions {
+    signal?: UnixSignal;              // 'SIGTERM' | 'SIGKILL' | 'SIGINT' | number
+    dryRun?: boolean;
+    tree?: boolean;
+    timeoutMs?: number;
+    forceAfterTimeout?: boolean;
+    escalationDelayMs?: number;
+    verify?: boolean;
+    retries?: number;
+    debug?: boolean;
+}
+
+interface KillResult {
+    pid: number;
+    success: boolean;
+    signal?: string | number;
+    error?: string;
+    verified?: boolean;
+}
+
+interface ProcessInfo {
+    pid: number;
+    name?: string;
+    command?: string;
+    ports?: number[];
+    parentPid?: number;
+    cpuUsage?: string;              // Unix only
+    memoryUsage?: string;
+}
+```
+
+### Error Classes
+
+```typescript
+import {
+    ProcessNotFoundError,    // Process not found
+    CommandExecutionError,   // Command failed
+    TimeoutError,           // Operation timed out
+    InvalidInputError       // Invalid parameters
+} from 'kproc';
+```
+
+## 🐛 Debug
+
+Enable debug logging để troubleshoot:
+
+```typescript
+import { setDebug, killByPort } from 'kproc';
+
+setDebug(true);
+
+// Sẽ log chi tiết: finding PID, kill command, verification, etc.
+await killByPort(3000);
+```
+
+## 💡 Common Use Cases
+
+### Free development port
+
+```typescript
+import { killByPort } from 'kproc';
+
+try {
+    await killByPort(3000, { tree: true });
+    console.log('✓ Port 3000 freed');
+} catch (error) {
+    console.log('No process on port 3000');
+}
+```
+
+### Clean up before starting server
+
+```typescript
+import { killByPort } from 'kproc';
+
+// Kill old server before starting new one
+await killByPort(3000, { tree: true }).catch(() => {});
+// Start new server
+startServer();
+```
+
+### Kill stubborn process
+
+```typescript
+import { killByPid } from 'kproc';
+
+// Auto-escalate to SIGKILL if SIGTERM doesn't work
+await killByPid(1234, {
+    forceAfterTimeout: true,
+    escalationDelayMs: 2000,
+    verify: true
+});
+```
+
+### Batch cleanup
+
+```typescript
+import { killByPorts } from 'kproc';
+
+// Clean up all development ports
+const ports = [3000, 3001, 8080, 8081];
+const results = await killByPorts(ports, { tree: true });
+
+console.log(`Cleaned ${results.filter(r => r.success).length} processes`);
+```
+
+## 📖 TypeScript & JavaScript
+
+### ES Modules (TypeScript/Modern JS)
+
+```typescript
+import { 
+    killByPort, 
+    type KillResult,
+    type KillOptions 
+} from 'kproc';
+
+const options: KillOptions = {
+    tree: true,
+    verify: true,
+    retries: 3
+};
+
+const result: KillResult = await killByPort(3000, options);
+```
+
+### CommonJS (Node.js)
+
+```javascript
+const { killByPort } = require('kproc');
+
+(async () => {
+    await killByPort(3000);
+})();
+```
+
+## 🔄 Migration from v1.x
+
+v2.0 is mostly backward compatible. Main changes:
+
+- Kill functions now return `KillResult` instead of `void`
+- Can ignore return value if you don't need it
+
+```typescript
+// v1.x - still works in v2.0
+await killByPid(1234);
+
+// v2.0 - can use detailed results
+const result = await killByPid(1234);
+if (result.success) {
+    console.log('Killed successfully');
+}
+```
+
+## 📝 Platform Support
+
+### Windows
+- Uses `taskkill` and PowerShell `Get-CimInstance`
+- Force flag (`/F`) always applied
+- Tree flag (`/T`) for process tree
+
+### Unix (Linux/macOS)
+- Uses `kill`, `ps`, and `lsof`
+- Configurable signals (SIGTERM, SIGKILL, etc.)
+- Signal escalation support
+
+## ⚠️ Error Handling
+
+```typescript
+import { 
+    killByPid, 
+    ProcessNotFoundError,
+    InvalidInputError 
+} from 'kproc';
+
+try {
+    const result = await killByPid(1234, { verify: true });
+    
+    if (!result.success) {
+        console.error('Kill failed:', result.error);
+    }
+} catch (error) {
+    if (error instanceof ProcessNotFoundError) {
+        console.log('Process not found');
+    } else if (error instanceof InvalidInputError) {
+        console.log('Invalid PID');
+    }
+}
+```
+
+## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## Author
+## 📄 License
 
-- **Email**: binhcoder02@gmail.com
-- **GitHub**: [binh-dev-k2](https://github.com/binh-dev-k2)
+MIT © [binh-dev-k2](https://github.com/binh-dev-k2)
+
+## 🔗 Links
+
+- [GitHub Repository](https://github.com/binh-dev-k2/kproc)
+- [npm Package](https://www.npmjs.com/package/kproc)
+- [Issues](https://github.com/binh-dev-k2/kproc/issues)
+
+---
+
+**Made with ❤️ by binh-dev-k2**

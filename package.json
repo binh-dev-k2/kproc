@@ -1,12 +1,13 @@
 {
   "name": "kproc",
-  "version": "1.0.4",
-  "description": "Kill a process by its PID or port",
+  "version": "2.0.0",
+  "description": "Advanced process management utility - Kill processes by PID or port with retry, verification, and detailed results",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
