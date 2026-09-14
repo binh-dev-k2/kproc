@@ -1,107 +1,70 @@
 /**
- * Custom error classes for better error handling and categorization
+ * Custom error hierarchy for kproc
  * @module errors
  */
 
 /**
- * Error thrown when a process is not found or doesn't exist
- * 
- * @example
- * ```typescript
- * try {
- *   await killByPort(3000);
- * } catch (error) {
- *   if (error instanceof ProcessNotFoundError) {
- *     console.log('No process found on port 3000');
- *   }
- * }
- * ```
+ * Base error class for all kproc errors
  */
-export class ProcessNotFoundError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'ProcessNotFoundError';
-        // Maintains proper stack trace for where error was thrown (only available on V8)
+export class KProcError extends Error {
+    /** Machine-readable error code */
+    public readonly code: string;
+
+    constructor(message: string, code: string, options?: { cause?: unknown }) {
+        super(message, options);
+        this.name = 'KProcError';
+        this.code = code;
+        Object.setPrototypeOf(this, new.target.prototype);
         if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, ProcessNotFoundError);
+            Error.captureStackTrace(this, new.target);
         }
     }
 }
 
 /**
- * Error thrown when a system command fails to execute
- * Contains the command that failed for debugging purposes
- * 
- * @example
- * ```typescript
- * try {
- *   await execText('invalid-command');
- * } catch (error) {
- *   if (error instanceof CommandExecutionError) {
- *     console.log(`Command failed: ${error.command}`);
- *   }
- * }
- * ```
+ * Error thrown when a process or port target cannot be found
  */
-export class CommandExecutionError extends Error {
+export class ProcessNotFoundError extends KProcError {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, 'PROCESS_NOT_FOUND', options);
+        this.name = 'ProcessNotFoundError';
+        Object.setPrototypeOf(this, ProcessNotFoundError.prototype);
+    }
+}
+
+/**
+ * Error thrown when a system command fails execution
+ */
+export class CommandExecutionError extends KProcError {
     /** The command that failed to execute */
     public readonly command: string;
 
-    constructor(message: string, command: string) {
-        super(message);
+    constructor(message: string, command: string, options?: { cause?: unknown }) {
+        super(message, 'COMMAND_EXECUTION_FAILED', options);
         this.name = 'CommandExecutionError';
         this.command = command;
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, CommandExecutionError);
-        }
+        Object.setPrototypeOf(this, CommandExecutionError.prototype);
     }
 }
 
 /**
- * Error thrown when an operation exceeds the specified timeout
- * 
- * @example
- * ```typescript
- * try {
- *   await killByPid(1234, { timeoutMs: 1000 });
- * } catch (error) {
- *   if (error instanceof TimeoutError) {
- *     console.log('Operation took too long');
- *   }
- * }
- * ```
+ * Error thrown when an operation exceeds its configured timeout
  */
-export class TimeoutError extends Error {
-    constructor(message: string) {
-        super(message);
+export class TimeoutError extends KProcError {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, 'OPERATION_TIMEOUT', options);
         this.name = 'TimeoutError';
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, TimeoutError);
-        }
+        Object.setPrototypeOf(this, TimeoutError.prototype);
     }
 }
 
 /**
- * Error thrown when invalid input parameters are provided
- * 
- * @example
- * ```typescript
- * try {
- *   await killByPort(99999); // Invalid port
- * } catch (error) {
- *   if (error instanceof InvalidInputError) {
- *     console.log('Invalid port number');
- *   }
- * }
- * ```
+ * Error thrown when invalid or hazardous input parameters are provided
  */
-export class InvalidInputError extends Error {
-    constructor(message: string) {
-        super(message);
+export class InvalidInputError extends KProcError {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, 'INVALID_INPUT', options);
         this.name = 'InvalidInputError';
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, InvalidInputError);
-        }
+        Object.setPrototypeOf(this, InvalidInputError.prototype);
     }
 }
-

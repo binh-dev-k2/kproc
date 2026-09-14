@@ -1,88 +1,69 @@
 /**
- * Debug logging system with configurable levels
+ * Logging system with configurable levels and custom sinks
  * @module logger
  */
 
-/**
- * Global debug flag
- * Can be toggled using setDebug() function
- */
 let debugEnabled = false;
 
 /**
- * Logger interface with different log levels
- * All logs are prefixed with [kproc:level] for easy filtering
- * 
- * @example
- * ```typescript
- * import { log } from './logger';
- * 
- * log.debug('Detailed debug info');  // Only shown if debug enabled
- * log.info('General information');   // Always shown
- * log.warn('Warning message');       // Always shown
- * log.error('Error occurred');       // Always shown
- * ```
+ * Log sink function signature
+ */
+export type LogSink = (level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) => void;
+
+let customSink: LogSink | null = null;
+
+/**
+ * Default logger interface
  */
 export const log = {
     /**
      * Debug level logging - only shown when debug is enabled
-     * Use for detailed troubleshooting information
-     * 
-     * @param args - Any values to log
      */
-    debug: (...args: any[]): void => {
-        if (debugEnabled) {
-            console.log('[kproc:debug]', ...args);
+    debug: (message: string, ...args: unknown[]): void => {
+        if (!debugEnabled) return;
+        if (customSink) {
+            customSink('debug', message, ...args);
+        } else {
+            console.log(`[kproc:debug] ${message}`, ...args);
         }
     },
 
     /**
-     * Info level logging - always shown
-     * Use for general informational messages
-     * 
-     * @param args - Any values to log
+     * Info level logging
      */
-    info: (...args: any[]): void => {
-        console.log('[kproc:info]', ...args);
+    info: (message: string, ...args: unknown[]): void => {
+        if (customSink) {
+            customSink('info', message, ...args);
+        } else {
+            console.log(`[kproc:info] ${message}`, ...args);
+        }
     },
 
     /**
-     * Warning level logging - always shown
-     * Use for non-critical issues that should be noted
-     * 
-     * @param args - Any values to log
+     * Warning level logging
      */
-    warn: (...args: any[]): void => {
-        console.warn('[kproc:warn]', ...args);
+    warn: (message: string, ...args: unknown[]): void => {
+        if (customSink) {
+            customSink('warn', message, ...args);
+        } else {
+            console.warn(`[kproc:warn] ${message}`, ...args);
+        }
     },
 
     /**
-     * Error level logging - always shown
-     * Use for critical errors and failures
-     * 
-     * @param args - Any values to log
+     * Error level logging
      */
-    error: (...args: any[]): void => {
-        console.error('[kproc:error]', ...args);
+    error: (message: string, ...args: unknown[]): void => {
+        if (customSink) {
+            customSink('error', message, ...args);
+        } else {
+            console.error(`[kproc:error] ${message}`, ...args);
+        }
     },
 };
 
 /**
  * Enable or disable debug logging globally
- * When enabled, all log.debug() calls will output to console
- * 
- * @param enabled - True to enable debug logs, false to disable
- * 
- * @example
- * ```typescript
- * import { setDebug } from 'kproc';
- * 
- * // Enable debug logging for development
- * setDebug(true);
- * 
- * // Disable for production
- * setDebug(false);
- * ```
  */
 export const setDebug = (enabled: boolean): void => {
     debugEnabled = enabled;
@@ -90,9 +71,13 @@ export const setDebug = (enabled: boolean): void => {
 };
 
 /**
- * Check if debug logging is currently enabled
- * 
- * @returns True if debug logging is enabled
+ * Check if debug logging is enabled
  */
 export const isDebugEnabled = (): boolean => debugEnabled;
 
+/**
+ * Set a custom logger sink for testing or enterprise logging integration
+ */
+export const setLogSink = (sink: LogSink | null): void => {
+    customSink = sink;
+};

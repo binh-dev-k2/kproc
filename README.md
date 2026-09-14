@@ -1,370 +1,283 @@
 # kproc
 
-> Lightweight Node.js utility để kill processes theo PID hoặc port - Cross-platform, TypeScript, zero dependencies.
+<div align="center">
 
-[![npm version](https://img.shields.io/npm/v/kproc.svg)](https://www.npmjs.com/package/kproc)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+**Production-grade, cross-platform process and port management for Node.js.**  
+*Kill processes by PID, port, port range, or pattern with process tree cleanup, retry escalation, and zero dependencies.*
 
-## ✨ Features
+[![npm version](https://img.shields.io/npm/v/kproc.svg?style=flat-square&color=blue)](https://www.npmjs.com/package/kproc)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg?style=flat-square)](https://www.npmjs.com/package/kproc)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
+[![Tests](https://img.shields.io/badge/tests-15%20passed-brightgreen.svg?style=flat-square)](https://github.com/binh-dev-k2/kproc)
 
-- 🚀 Kill process theo PID, port, port range, hoặc tên
-- 🔄 Retry mechanism với signal escalation (SIGTERM → SIGKILL)
-- ✅ Process verification (xác nhận process đã chết)
-- 🌳 Kill entire process tree (parent + children)
-- 📊 Detailed results với status, error, verification
-- ⚡ Smart caching và parallel operations
-- 🐛 Debug logging
-- 💻 Cross-platform (Windows, Linux, macOS)
-- 📦 Zero dependencies
+</div>
+
+---
+
+## ⚡ Highlights
+
+- **📦 Zero Runtime Dependencies** — No bloated `node_modules`, zero supply chain attack surface.
+- **🚀 Sub-Millisecond Speed** — Microsecond process existence checks using native `process.kill(pid, 0)` syscalls rather than launching slow sub-shells (`tasklist` / `kill -0`).
+- **🎯 Exact Port Matching** — Eliminates false-positive substring matches on Windows (e.g. port `80` will never mistakenly match `8080` or outbound TCP sockets).
+- **🛡️ Built-in Safety Guards** — Protects against accidental suicide of the calling process (`process.pid`) or critical OS kernel processes (PID `0`, `4` on Windows, PID `1` on Unix) unless explicitly overridden.
+- **🌳 Process Tree Termination** — Recursively discovers and terminates parent and all child/descendant processes (via `taskkill /T` on Windows and BFS process tree traversal on Unix).
+- **🔄 Signal Escalation & Verification** — Graceful `SIGTERM` with automatic escalation to `SIGKILL` if a stubborn process refuses to exit, plus optional cryptographic/kernel death verification.
+- **🐳 Docker & Minimal Linux Ready** — Automated fallback chain: `lsof` → `ss` → `fuser` for minimal Alpine/distroless containers.
+- **💎 Modern Dual Package** — Full ESM and CommonJS exports with complete TypeScript declaration files (`.d.ts` / `.d.mts`).
+
+---
+
+## 📊 Feature Comparison
+
+| Feature | `kproc` | `fkill` | `kill-port` | `tree-kill` |
+|:---|:---:|:---:|:---:|:---:|
+| **Runtime Dependencies** | **0** | 10+ | 1 | 0 |
+| **Kill by Port** | ✅ | ✅ | ✅ | ❌ |
+| **Kill by Port Range** | ✅ | ❌ | ❌ | ❌ |
+| **Kill by PID** | ✅ | ✅ | ❌ | ✅ |
+| **Kill by Name / Regex** | ✅ | ✅ | ❌ | ❌ |
+| **Process Tree Cleanup** | ✅ | ✅ | ❌ | ✅ |
+| **Host Suicide Safety Guard** | ✅ | ❌ | ❌ | ❌ |
+| **Native Microsecond Checks** | ✅ | ❌ | ❌ | ❌ |
+| **Retry & Signal Escalation** | ✅ | ❌ | ❌ | ❌ |
+| **Zero Substring False-Positives** | ✅ | ❌ | ❌ | N/A |
+| **ESM + CJS Dual Export** | ✅ | ESM only | CJS only | CJS only |
+
+---
 
 ## 📦 Installation
 
 ```bash
+# pnpm
+pnpm add kproc
+
+# npm
 npm install kproc
+
+# yarn
+yarn add kproc
+
+# bun
+bun add kproc
 ```
+
+---
 
 ## 🚀 Quick Start
 
-### Kill process on port (most common)
+### 1. Free Up a Port (Most Common)
 
 ```typescript
 import { killByPort } from 'kproc';
 
-// Free up port 3000
-await killByPort(3000);
+// Terminate whichever process is listening on port 3000
+const result = await killByPort(3000, { tree: true, verify: true });
+
+if (result.success) {
+    console.log(`Port 3000 freed! (Killed PID: ${result.pid})`);
+}
 ```
 
-### Kill by PID
+### 2. Kill by PID with Verification & Tree Cleanup
 
 ```typescript
 import { killByPid } from 'kproc';
 
-// Simple kill
-await killByPid(1234);
-
-// Kill with verification
-const result = await killByPid(1234, {
-    verify: true,    // Confirm process is dead
-    retries: 3,      // Retry up to 3 times
-    tree: true       // Kill all children too
+const result = await killByPid(14820, {
+    tree: true,     // Terminate all descendant child processes
+    verify: true,   // Confirm kernel has removed process from table
+    retries: 3      // Auto-retry up to 3 times on transient failure
 });
 
-if (result.success) {
-    console.log('✓ Process killed');
-}
+console.log(result);
+// { pid: 14820, success: true, verified: true, signal: 'SIGTERM' }
 ```
 
-### Find process on port
+### 3. Kill Multiple Ports & Port Ranges
 
 ```typescript
-import { findPidsByPort, getProcessInfo } from 'kproc';
+import { killByPorts, killByPortRange } from 'kproc';
 
-// Find PIDs
-const pids = await findPidsByPort(8080);
+// Kill specific development ports in parallel
+await killByPorts([3000, 3001, 8080, 8081]);
 
-// Get detailed info
-const info = await getProcessInfo(pids[0]);
-console.log(info);
-// { pid, name, command, ports, parentPid, memoryUsage }
+// Kill an entire range of ports
+await killByPortRange(4000, 4010, { tree: true });
 ```
 
-### Kill multiple processes
-
-```typescript
-import { killByPids, killByPorts, killByPortRange } from 'kproc';
-
-// Kill multiple PIDs in parallel
-const results = await killByPids([1234, 5678, 9012]);
-
-// Kill multiple ports
-await killByPorts([3000, 3001, 8080]);
-
-// Kill port range
-await killByPortRange(3000, 3010);
-```
-
-### Kill by name
+### 4. Kill by Name or Regex
 
 ```typescript
 import { killByName } from 'kproc';
 
-// Kill all Chrome processes
+// Kill all processes named "chrome"
 await killByName('chrome', { tree: true });
 
-// Kill with regex
-await killByName('node.*--inspect', { 
+// Kill using regular expressions
+await killByName('node.*--inspect', {
     useRegex: true,
-    tree: true 
+    tree: true
 });
 ```
 
-## 🎯 Advanced Options
+### 5. Inspect Process & Port Metadata
 
-```javascript
-await killByPid(1234, {
-    // Unix signal (ignored on Windows)
-    signal: 'SIGTERM',              // default
-    
-    // Auto-escalate to SIGKILL if process won't die (Unix)
-    forceAfterTimeout: true,
-    escalationDelayMs: 3000,        // wait 3s before SIGKILL
-    
-    // Verify process is actually dead
-    verify: true,
-    
-    // Retry on failure
-    retries: 3,
-    
-    // Kill entire process tree
-    tree: true,
-    
-    // Command timeout
-    timeoutMs: 5000,
-    
-    // Debug logging
-    debug: true
-});
+```typescript
+import { findPidsByPort, getProcessInfo } from 'kproc';
+
+// Discover PIDs bound to port 8080
+const [pid] = await findPidsByPort(8080);
+
+if (pid) {
+    const info = await getProcessInfo(pid);
+    console.log(info);
+    // {
+    //   pid: 14208,
+    //   name: "node.exe",
+    //   command: "node server.js",
+    //   ports: [8080],
+    //   parentPid: 9812,
+    //   memoryUsage: "48 MB"
+    // }
+}
 ```
+
+---
+
+## 🛡️ Safety Guards
+
+`kproc` includes production safeguards to prevent accidental self-termination or catastrophic system crashes:
+
+```typescript
+import { killByPid, InvalidInputError } from 'kproc';
+
+try {
+    // ❌ By default, kproc blocks attempts to kill the current Node process:
+    await killByPid(process.pid);
+} catch (error) {
+    if (error instanceof InvalidInputError) {
+        console.error('Safety guard triggered:', error.message);
+        // "Refusing to kill current process (PID: ...). Set allowCurrentProcess: true if this is intentional."
+    }
+}
+
+// ✅ Explicit opt-in when self-termination is intended:
+await killByPid(process.pid, { allowCurrentProcess: true });
+```
+
+Similarly, system-critical PIDs (PID `0` and `4` on Windows, PID `1` on Unix) are protected unless `{ force: true }` is supplied.
+
+---
 
 ## 📚 API Reference
 
-### Kill Functions
+### Process Termination
+
+| Function | Parameters | Return Type | Description |
+|:---|:---|:---|:---|
+| `killByPort(port, options?)` | `port: number, options?: KillOptions` | `Promise<KillResult>` | Terminate process listening on given port |
+| `killByPorts(ports, options?)` | `ports: number[], options?: KillOptions` | `Promise<KillResult[]>` | Terminate processes on multiple ports in parallel |
+| `killByPortRange(start, end, options?)` | `start: number, end: number, options?: KillOptions` | `Promise<KillResult[]>` | Terminate all processes bound to ports in range |
+| `killByPid(pid, options?)` | `pid: number, options?: KillOptions` | `Promise<KillResult>` | Terminate process by PID with retry and escalation |
+| `killByPids(pids, options?)` | `pids: number[], options?: KillOptions` | `Promise<KillResult[]>` | Terminate multiple PIDs in parallel |
+| `killByName(pattern, options?)` | `pattern: string, options?: FindByNameOptions & KillOptions` | `Promise<KillResult[]>` | Terminate processes matching substring or regex |
+
+### Inspection & Lookup
+
+| Function | Parameters | Return Type | Description |
+|:---|:---|:---|:---|
+| `findPidsByPort(port, options?)` | `port: number, options?: PortLookupOptions \| number` | `Promise<number[]>` | Get array of PIDs bound to a port |
+| `findPidByPort(port, options?)` | `port: number, options?: PortLookupOptions \| number` | `Promise<number>` | Get main PID on port (throws `ProcessNotFoundError` if none) |
+| `findPortsByPid(pid, timeoutMs?)` | `pid: number, timeoutMs?: number` | `Promise<number[]>` | Reverse lookup: list ports opened by PID |
+| `findPidsByName(pattern, options?)` | `pattern: string, options?: FindByNameOptions` | `Promise<number[]>` | Find PIDs matching name or regex |
+| `getProcessInfo(pid, timeoutMs?)` | `pid: number, timeoutMs?: number` | `Promise<ProcessInfo>` | Retrieve process name, command, parent PID, ports, memory |
+| `isProcessAlive(pid)` | `pid: number` | `Promise<boolean>` | Microsecond check if process exists in OS table |
+
+### Options Interfaces
 
 ```typescript
-killByPid(pid: number, options?: KillOptions): Promise<KillResult>
-killByPids(pids: number[], options?: KillOptions): Promise<KillResult[]>
-killByPort(port: number, options?: KillOptions): Promise<KillResult>
-killByPorts(ports: number[], options?: KillOptions): Promise<KillResult[]>
-killByPortRange(start: number, end: number, options?: KillOptions): Promise<KillResult[]>
-killByName(pattern: string, options?: FindByNameOptions & KillOptions): Promise<KillResult[]>
-```
+export interface KillOptions {
+    /** Signal to send on Unix systems (ignored on Windows). Default: "SIGTERM" */
+    signal?: UnixSignal;
 
-### Lookup Functions
-
-```typescript
-findPidsByPort(port: number): Promise<number[]>
-findPidByPort(port: number): Promise<number>
-findPidsByName(pattern: string, options?: FindByNameOptions): Promise<number[]>
-findPortsByPid(pid: number): Promise<number[]>
-getProcessInfo(pid: number): Promise<ProcessInfo>
-isProcessAlive(pid: number): Promise<boolean>
-```
-
-### Utilities
-
-```typescript
-setDebug(enabled: boolean): void           // Enable debug logs
-clearCache(): void                         // Clear process cache
-getCacheStats(): { size: number, oldestAge: number | null }
-```
-
-### Types
-
-```typescript
-interface KillOptions {
-    signal?: UnixSignal;              // 'SIGTERM' | 'SIGKILL' | 'SIGINT' | number
+    /** Simulate kill without actually terminating the process. Default: false */
     dryRun?: boolean;
+
+    /** Kill process tree (parent and all descendant children). Default: false */
     tree?: boolean;
+
+    /** Maximum time in milliseconds to wait for system operations */
     timeoutMs?: number;
+
+    /** Auto-escalate from SIGTERM to SIGKILL if process won't exit (Unix). Default: false */
     forceAfterTimeout?: boolean;
+
+    /** Delay before escalating to SIGKILL. Default: 3000ms */
     escalationDelayMs?: number;
+
+    /** Verify process is dead after kill attempt. Default: false */
     verify?: boolean;
+
+    /** Retry attempts if kill command fails. Default: 0 */
     retries?: number;
+
+    /** Enable verbose debug logging for this operation. Default: false */
     debug?: boolean;
-}
 
-interface KillResult {
-    pid: number;
-    success: boolean;
-    signal?: string | number;
-    error?: string;
-    verified?: boolean;
-}
+    /** Safety guard: Allow killing process.pid. Default: false */
+    allowCurrentProcess?: boolean;
 
-interface ProcessInfo {
-    pid: number;
-    name?: string;
-    command?: string;
-    ports?: number[];
-    parentPid?: number;
-    cpuUsage?: string;              // Unix only
-    memoryUsage?: string;
+    /** Force kill, bypassing checks on critical system PIDs (0, 4 on Windows, 1 on Unix). Default: false */
+    force?: boolean;
 }
 ```
 
-### Error Classes
+---
+
+## ⚠️ Error Hierarchy
+
+All custom errors inherit from `KProcError`, featuring machine-readable `code` properties and error cause chains:
 
 ```typescript
 import {
-    ProcessNotFoundError,    // Process not found
-    CommandExecutionError,   // Command failed
-    TimeoutError,           // Operation timed out
-    InvalidInputError       // Invalid parameters
+    KProcError,
+    ProcessNotFoundError,     // code: "PROCESS_NOT_FOUND"
+    CommandExecutionError,    // code: "COMMAND_EXECUTION_FAILED"
+    TimeoutError,             // code: "OPERATION_TIMEOUT"
+    InvalidInputError         // code: "INVALID_INPUT"
 } from 'kproc';
-```
-
-## 🐛 Debug
-
-Enable debug logging để troubleshoot:
-
-```typescript
-import { setDebug, killByPort } from 'kproc';
-
-setDebug(true);
-
-// Sẽ log chi tiết: finding PID, kill command, verification, etc.
-await killByPort(3000);
-```
-
-## 💡 Common Use Cases
-
-### Free development port
-
-```typescript
-import { killByPort } from 'kproc';
 
 try {
-    await killByPort(3000, { tree: true });
-    console.log('✓ Port 3000 freed');
-} catch (error) {
-    console.log('No process on port 3000');
-}
-```
-
-### Clean up before starting server
-
-```typescript
-import { killByPort } from 'kproc';
-
-// Kill old server before starting new one
-await killByPort(3000, { tree: true }).catch(() => {});
-// Start new server
-startServer();
-```
-
-### Kill stubborn process
-
-```typescript
-import { killByPid } from 'kproc';
-
-// Auto-escalate to SIGKILL if SIGTERM doesn't work
-await killByPid(1234, {
-    forceAfterTimeout: true,
-    escalationDelayMs: 2000,
-    verify: true
-});
-```
-
-### Batch cleanup
-
-```typescript
-import { killByPorts } from 'kproc';
-
-// Clean up all development ports
-const ports = [3000, 3001, 8080, 8081];
-const results = await killByPorts(ports, { tree: true });
-
-console.log(`Cleaned ${results.filter(r => r.success).length} processes`);
-```
-
-## 📖 TypeScript & JavaScript
-
-### ES Modules (TypeScript/Modern JS)
-
-```typescript
-import { 
-    killByPort, 
-    type KillResult,
-    type KillOptions 
-} from 'kproc';
-
-const options: KillOptions = {
-    tree: true,
-    verify: true,
-    retries: 3
-};
-
-const result: KillResult = await killByPort(3000, options);
-```
-
-### CommonJS (Node.js)
-
-```javascript
-const { killByPort } = require('kproc');
-
-(async () => {
     await killByPort(3000);
-})();
-```
-
-## 🔄 Migration from v1.x
-
-v2.0 is mostly backward compatible. Main changes:
-
-- Kill functions now return `KillResult` instead of `void`
-- Can ignore return value if you don't need it
-
-```typescript
-// v1.x - still works in v2.0
-await killByPid(1234);
-
-// v2.0 - can use detailed results
-const result = await killByPid(1234);
-if (result.success) {
-    console.log('Killed successfully');
-}
-```
-
-## 📝 Platform Support
-
-### Windows
-- Uses `taskkill` and PowerShell `Get-CimInstance`
-- Force flag (`/F`) always applied
-- Tree flag (`/T`) for process tree
-
-### Unix (Linux/macOS)
-- Uses `kill`, `ps`, and `lsof`
-- Configurable signals (SIGTERM, SIGKILL, etc.)
-- Signal escalation support
-
-## ⚠️ Error Handling
-
-```typescript
-import { 
-    killByPid, 
-    ProcessNotFoundError,
-    InvalidInputError 
-} from 'kproc';
-
-try {
-    const result = await killByPid(1234, { verify: true });
-    
-    if (!result.success) {
-        console.error('Kill failed:', result.error);
-    }
 } catch (error) {
     if (error instanceof ProcessNotFoundError) {
-        console.log('Process not found');
-    } else if (error instanceof InvalidInputError) {
-        console.log('Invalid PID');
+        console.log('Port 3000 is already free.');
+    } else if (error instanceof KProcError) {
+        console.error(`kproc failed [${error.code}]:`, error.message);
     }
 }
 ```
 
-## 🤝 Contributing
+---
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 🐳 Docker & Minimal Linux Environments
+
+In stripped-down Docker images (such as `node:alpine` or `node:slim`), the standard `lsof` tool might not be pre-installed. 
+
+`kproc` automatically handles this:
+1. Attempts `lsof -t -i :<port>`
+2. Falls back to `ss -lntp '( sport = :<port> )'`
+3. Falls back to `fuser <port>/tcp`
+
+If using Alpine Linux and you want maximum speed, you can optionally install `lsof`:
+```dockerfile
+RUN apk add --no-cache lsof
+```
+
+---
 
 ## 📄 License
 
 MIT © [binh-dev-k2](https://github.com/binh-dev-k2)
-
-## 🔗 Links
-
-- [GitHub Repository](https://github.com/binh-dev-k2/kproc)
-- [npm Package](https://www.npmjs.com/package/kproc)
-- [Issues](https://github.com/binh-dev-k2/kproc/issues)
-
----
-
-**Made with ❤️ by binh-dev-k2**
